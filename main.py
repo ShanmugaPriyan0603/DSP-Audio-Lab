@@ -16,7 +16,11 @@ from dsp.noise import (
     stop_audio,
 )
 from dsp.metrics import calculate_noise_metrics
-from dsp.separation import isolate_frequency_band
+from dsp.separation import (
+    apply_magnitude_mask,
+    isolate_frequency_band,
+    separate_harmonic_percussive,
+)
 from visualization.plots import (
     plot_audio_analysis,
     plot_cancellation_results,
@@ -26,6 +30,8 @@ from visualization.plots import (
     plot_signal_and_spectrum,
     plot_spectrogram,
     plot_frequency_band_isolation,
+    plot_separation_waveforms,
+    plot_source_spectra,
 )
 
 
@@ -45,7 +51,7 @@ def print_banner():
     print("╚══════════════════════════════════════════════╝")
     print()
 
-def load_and_analyze_audio():
+def load_and_analyze_audio(analyze=True):
     print()
     print("=== AUDIO ANALYSIS ===")
     print()
@@ -78,6 +84,9 @@ def load_and_analyze_audio():
     print(f"Duration      : {duration:.2f} seconds")
     print(f"Channels      : Mono")
     print()
+
+    if not analyze:
+        return
 
     print("Calculating FFT...")
 
@@ -392,55 +401,110 @@ def source_separation_lab():
 
         if choice == "0":
             return
-        if choice != "1":
-            print("That separation experiment is not implemented yet.")
-            continue
-
         try:
-            low_frequency = float(input("Low frequency (Hz) [20]: ") or 20)
-            high_frequency = float(input("High frequency (Hz) [250]: ") or 250)
             n_fft = 2048
             hop_length = 512
-            print("Applying STFT frequency mask...")
-            original_stft, _, masked_stft, isolated = isolate_frequency_band(
-                original,
-                sample_rate,
-                low_frequency,
-                high_frequency,
-                n_fft,
-                hop_length,
-            )
-            plot_frequency_band_isolation(
-                original,
-                isolated,
-                original_stft,
-                masked_stft,
-                sample_rate,
-                hop_length,
-                low_frequency,
-                high_frequency,
-            )
-            print("Band isolation complete.")
-            while True:
-                playback = input("[P] Play  [S] Stop  [Enter] Continue: ").strip().lower()
-                if playback == "p":
-                    selection = input("Play [1] Original  [2] Isolated band: ").strip()
-                    selected = {"1": original, "2": isolated}.get(selection)
-                    if selected is None:
-                        print("Invalid playback selection.")
-                    else:
-                        play_audio(selected, sample_rate)
-                elif playback == "s":
-                    stop_audio()
-                    print("Playback stopped.")
-                elif playback == "":
-                    break
-                else:
-                    print("Invalid playback command.")
+            if choice == "1":
+                low_frequency = float(input("Low frequency (Hz) [20]: ") or 20)
+                high_frequency = float(input("High frequency (Hz) [250]: ") or 250)
+                print("Applying STFT frequency mask...")
+                original_stft, _, masked_stft, isolated = isolate_frequency_band(
+                    original, sample_rate, low_frequency, high_frequency,
+                    n_fft, hop_length,
+                )
+                plot_frequency_band_isolation(
+                    original, isolated, original_stft, masked_stft, sample_rate,
+                    hop_length, low_frequency, high_frequency,
+                )
+                _separation_playback_prompt(
+                    {"1": original, "2": isolated}, sample_rate,
+                    "Original", "Isolated band",
+                )
+            elif choice == "2":
+                harmonic, percussive, _, _, _ = separate_harmonic_percussive(
+                    original, sample_rate, n_fft, hop_length
+                )
+                plot_separation_waveforms(
+                    (original, harmonic, percussive),
+                    ("Original", "Harmonic", "Percussive"),
+                    "Harmonic / Percussive Separation",
+                )
+                _separation_playback_prompt(
+                    {"1": original, "2": harmonic, "3": percussive},
+                    sample_rate, "Original", "Harmonic", "Percussive",
+                )
+            elif choice == "3":
+                threshold_db = float(input("Relative threshold (dB) [-24]: ") or -24)
+                selected, residual, _, _ = apply_magnitude_mask(
+                    original, sample_rate, threshold_db, n_fft, hop_length
+                )
+                plot_separation_waveforms(
+                    (original, selected, residual),
+                    ("Original", "Selected", "Residual"),
+                    f"Time-Frequency Masking ({threshold_db:g} dB)",
+                )
+                _separation_playback_prompt(
+                    {"1": original, "2": selected, "3": residual},
+                    sample_rate, "Original", "Selected", "Residual",
+                )
+            elif choice == "4":
+                low_frequency = float(input("Vocal band low (Hz) [300]: ") or 300)
+                high_frequency = float(input("Vocal band high (Hz) [3400]: ") or 3400)
+                _, _, _, vocal = isolate_frequency_band(
+                    original, sample_rate, low_frequency, high_frequency,
+                    n_fft, hop_length,
+                )
+                plot_separation_waveforms(
+                    (original, vocal), ("Original", "Vocal-band estimate"),
+                    "Vocal Isolation (Mono Frequency-Band Estimate)",
+                )
+                _separation_playback_prompt(
+                    {"1": original, "2": vocal}, sample_rate,
+                    "Original", "Vocal-band estimate",
+                )
+            elif choice == "5":
+                harmonic, percussive, _, _, _ = separate_harmonic_percussive(
+                    original, sample_rate, n_fft, hop_length
+                )
+                frequencies, magnitudes = _spectra_for(
+                    (original, harmonic, percussive), sample_rate
+                )
+                plot_source_spectra(
+                    frequencies, magnitudes,
+                    ("Original", "Harmonic", "Percussive"),
+                    sample_rate, "Source Spectrum Comparison",
+                )
+            else:
+                print("Invalid selection.")
         except (ValueError, TypeError) as error:
             print(f"Invalid Source Separation parameter: {error}")
         except Exception as error:
             print(f"Source Separation Lab error: {error}")
+
+
+def _separation_playback_prompt(signals, sample_rate, *labels):
+    """Offer playback choices for source-separation results."""
+    while True:
+        playback = input("[P] Play  [S] Stop  [Enter] Continue: ").strip().lower()
+        if playback == "p":
+            selection = input("Play " + "  ".join(
+                f"[{index + 1}] {label}" for index, label in enumerate(labels)
+            ) + ": ").strip()
+            selected = signals.get(selection)
+            if selected is None:
+                print("Invalid playback selection.")
+            else:
+                try:
+                    play_audio(selected, sample_rate)
+                except Exception as error:
+                    print(f"ERROR: Could not play audio. Details: {error}")
+        elif playback == "s":
+            stop_audio()
+            print("Playback stopped.")
+        elif playback == "":
+            return
+        else:
+            print("Invalid playback command.")
 def main():
     while True:
 
@@ -453,11 +517,11 @@ def main():
 
         elif choice == "2":
             print()
-            load_and_analyze_audio()
+            load_and_analyze_audio(analyze=False)
 
         elif choice == "3":
             print()
-            print("FFT analysis will be expanded in Phase 1B.")
+            load_and_analyze_audio()
     
         elif choice == "4":
             print()

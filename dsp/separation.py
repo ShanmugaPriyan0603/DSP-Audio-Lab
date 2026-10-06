@@ -83,3 +83,66 @@ def isolate_frequency_band(
         length=values.size,
     )
     return stft, mask, masked_stft, isolated
+
+
+def separate_harmonic_percussive(
+    signal: np.ndarray,
+    sample_rate: int,
+    n_fft: int = 2048,
+    hop_length: int = 512,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Separate harmonic and percussive content with median-filtered masks."""
+    values = _validate_signal(signal)
+    if sample_rate <= 0 or n_fft <= 0 or hop_length <= 0:
+        raise ValueError("sample_rate, n_fft, and hop_length must be positive")
+
+    stft = librosa.stft(
+        values, n_fft=n_fft, hop_length=hop_length, window="hann"
+    )
+    harmonic_stft, percussive_stft = librosa.decompose.hpss(stft)
+    total_magnitude = np.maximum(
+        np.abs(harmonic_stft) + np.abs(percussive_stft), 1e-12
+    )
+    harmonic_mask = np.abs(harmonic_stft) / total_magnitude
+    percussive_mask = np.abs(percussive_stft) / total_magnitude
+    harmonic = librosa.istft(
+        harmonic_stft, hop_length=hop_length, window="hann", length=values.size
+    )
+    percussive = librosa.istft(
+        percussive_stft,
+        hop_length=hop_length,
+        window="hann",
+        length=values.size,
+    )
+    return harmonic, percussive, harmonic_mask, percussive_mask, stft
+
+
+def apply_magnitude_mask(
+    signal: np.ndarray,
+    sample_rate: int,
+    threshold_db: float = -24.0,
+    n_fft: int = 2048,
+    hop_length: int = 512,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Keep STFT bins above a relative magnitude threshold and reconstruct both parts."""
+    values = _validate_signal(signal)
+    if sample_rate <= 0 or n_fft <= 0 or hop_length <= 0:
+        raise ValueError("sample_rate, n_fft, and hop_length must be positive")
+    if threshold_db > 0:
+        raise ValueError("threshold_db must be zero or negative")
+
+    stft = librosa.stft(
+        values, n_fft=n_fft, hop_length=hop_length, window="hann"
+    )
+    magnitude = np.abs(stft)
+    frame_peaks = np.maximum(np.max(magnitude, axis=0, keepdims=True), 1e-12)
+    mask = magnitude >= frame_peaks * (10 ** (threshold_db / 20))
+    selected_stft = stft * mask
+    residual_stft = stft * ~mask
+    selected = librosa.istft(
+        selected_stft, hop_length=hop_length, window="hann", length=values.size
+    )
+    residual = librosa.istft(
+        residual_stft, hop_length=hop_length, window="hann", length=values.size
+    )
+    return selected, residual, mask, stft

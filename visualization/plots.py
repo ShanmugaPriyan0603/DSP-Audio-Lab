@@ -166,6 +166,31 @@ def plot_frequency_band_isolation(
     plt.show()
 
 
+def plot_separation_waveforms(signals, labels, title):
+    """Display source-separation time-domain components."""
+    fig, axes = plt.subplots(len(signals), 1, figsize=(14, 3 * len(signals)), sharex=True)
+    axes = np.atleast_1d(axes)
+    for axis, signal, label in zip(axes, signals, labels):
+        time = np.arange(len(signal))
+        axis.plot(time, signal)
+        axis.set_ylabel(label)
+        axis.grid(True)
+    axes[-1].set_xlabel("Sample")
+    fig.suptitle(title, fontsize=15, fontweight="bold")
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    plt.show()
+
+
+def plot_source_spectra(frequencies, magnitudes, labels, sample_rate, title):
+    """Display multiple source spectra on a shared frequency axis."""
+    fig, axis = plt.subplots(figsize=(14, 7))
+    for magnitude, label in zip(magnitudes, labels):
+        _plot_spectrum(axis, frequencies, magnitude, sample_rate, label)
+    axis.set_title(title)
+    plt.tight_layout()
+    plt.show()
+
+
 def _spectrum_limit(sample_rate):
     """Return a readable upper frequency limit for spectrum plots."""
     return min(20000, sample_rate / 2)
