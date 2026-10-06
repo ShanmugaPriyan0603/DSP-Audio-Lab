@@ -8,6 +8,7 @@ An educational Python project for demonstrating digital signal processing concep
 - FFT and frequency-spectrum analysis
 - STFT spectrograms
 - White-noise and sinusoidal-noise generation
+- Controlled 8%-residual cancellation for every Noise Lab noise type
 - 50/60 Hz power-line hum demonstrations
 - Known-signal anti-noise cancellation
 - IIR notch filtering with SciPy
@@ -29,7 +30,7 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-Choose `3` for FFT analysis, `4` for a spectrogram, `5` for the terminal-controlled Noise Lab, or `6` for the Source Separation Lab. Source Separation Lab provides frequency-band isolation, harmonic/percussive separation, relative-magnitude time-frequency masking, vocal-band isolation, and source-spectrum comparison. Vocal isolation is an approximation for mono files: it keeps a configurable vocal frequency band rather than using stereo center-channel cancellation. Audio playback is optional and requires an available output device. Provide a local audio-file path when prompted. Audio files and generated output are intentionally ignored by Git; add your own test audio locally under `data/`.
+Choose `3` for FFT analysis, `4` for a spectrogram, `5` for the terminal-controlled Noise Lab, or `6` for the Source Separation Lab. Every Noise Lab noise type provides `Original`, `Noisy`, and `Denoised` playback; the denoised result removes 92% of the generated interference while preserving 8% as a slight residual. The notch-filter experiment also provides its genuine `Filtered` result for comparison. This is a controlled demonstration because the lab knows the generated interference; it is not blind denoising of an arbitrary recording. Source Separation Lab provides frequency-band isolation, harmonic/percussive separation, relative-magnitude time-frequency masking, vocal-band isolation, and source-spectrum comparison. Vocal isolation is an approximation for mono files: it keeps a configurable vocal frequency band rather than using stereo center-channel cancellation. Audio playback is optional and requires an available output device. Provide a local audio-file path when prompted. Audio files and generated output are intentionally ignored by Git; add your own test audio locally under `data/`.
 
 ## Project Structure
 

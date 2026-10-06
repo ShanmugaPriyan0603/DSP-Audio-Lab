@@ -7,12 +7,13 @@ from dsp.fft import (
 from audio.loader import load_audio, normalize_audio
 from dsp.fft import calculate_stft
 from dsp.noise import (
-    add_sinusoidal_noise,
     add_white_noise,
     apply_notch_filter,
     create_sinusoidal_noise,
+    create_white_noise,
     notch_frequency_response,
     play_audio,
+    remove_known_noise,
     stop_audio,
 )
 from dsp.metrics import calculate_noise_metrics
@@ -26,6 +27,7 @@ from visualization.plots import (
     plot_cancellation_results,
     plot_filter_result,
     plot_noise_comparison,
+    plot_noise_removal_comparison,
     plot_noise_spectrum_comparison,
     plot_signal_and_spectrum,
     plot_spectrogram,
@@ -234,12 +236,16 @@ def _spectra_for(signals, sample_rate):
     return frequencies, magnitudes
 
 
-def _playback_prompt(signals, sample_rate):
+def _playback_prompt(signals, sample_rate, labels):
     """Offer explicit playback choices after a Noise Lab visualization."""
+    choices = tuple(signals)
     while True:
         choice = input("[P] Play  [S] Stop  [Enter] Continue: ").strip().lower()
         if choice == "p":
-            selection = input("Play [1] Original  [2] Noisy  [3] Filtered/Cancelled: ")
+            prompt = "  ".join(
+                f"[{key}] {labels[key]}" for key in choices
+            )
+            selection = input(f"Play {prompt}: ").strip()
             selected = signals.get(selection)
             if selected is None:
                 print("Invalid playback selection.")
@@ -309,17 +315,41 @@ def noise_lab():
         try:
             if choice == "1":
                 amplitude = float(input("Noise amplitude [0.1]: ") or 0.1)
-                noisy = add_white_noise(original, amplitude)
-                _show_noise_comparison(original, noisy, sample_rate, "White Noise")
-                _playback_prompt({"1": original, "2": noisy}, sample_rate)
+                white_noise = create_white_noise(len(original), amplitude)
+                noisy = original + white_noise
+                denoised = remove_known_noise(noisy, white_noise)
+                frequencies, magnitudes = _spectra_for(
+                    (original, noisy, denoised), sample_rate
+                )
+                plot_noise_removal_comparison(
+                    np.arange(len(original)) / sample_rate,
+                    (original, noisy, denoised),
+                    frequencies,
+                    magnitudes,
+                    sample_rate,
+                    "White-Noise Reduction",
+                    processed_label="Denoised",
+                )
+                _print_noise_metrics(original, noisy, denoised)
+                _playback_prompt(
+                    {"1": original, "2": noisy, "3": denoised}, sample_rate,
+                    {"1": "Original", "2": "Noisy", "3": "Denoised"},
+                )
             elif choice == "2":
                 frequency = float(input("Noise frequency (Hz) [1000]: ") or 1000)
                 amplitude = float(input("Noise amplitude [0.1]: ") or 0.1)
-                noisy = add_sinusoidal_noise(original, sample_rate, frequency, amplitude)
+                noise = create_sinusoidal_noise(
+                    len(original), sample_rate, frequency, amplitude
+                )
+                noisy = original + noise
+                denoised = remove_known_noise(noisy, noise)
                 _show_noise_comparison(
                     original, noisy, sample_rate, "Sinusoidal Interference", frequency
                 )
-                _playback_prompt({"1": original, "2": noisy}, sample_rate)
+                _playback_prompt(
+                    {"1": original, "2": noisy, "3": denoised}, sample_rate,
+                    {"1": "Original", "2": "Noisy", "3": "Denoised"},
+                )
             elif choice == "3":
                 hum_choice = input("[1] 50 Hz  [2] 60 Hz: ").strip()
                 frequency = 50.0 if hum_choice == "1" else 60.0 if hum_choice == "2" else 0
@@ -327,16 +357,22 @@ def noise_lab():
                     print("Invalid hum frequency selection.")
                     continue
                 amplitude = float(input("Hum amplitude [0.1]: ") or 0.1)
-                noisy = add_sinusoidal_noise(original, sample_rate, frequency, amplitude)
+                noise = create_sinusoidal_noise(
+                    len(original), sample_rate, frequency, amplitude
+                )
+                noisy = original + noise
+                denoised = remove_known_noise(noisy, noise)
                 _show_noise_comparison(original, noisy, sample_rate, "Power-Line Hum", frequency)
-                _playback_prompt({"1": original, "2": noisy}, sample_rate)
+                _playback_prompt(
+                    {"1": original, "2": noisy, "3": denoised}, sample_rate,
+                    {"1": "Original", "2": "Noisy", "3": "Denoised"},
+                )
             elif choice == "4":
                 frequency = float(input("Interference frequency (Hz) [1000]: ") or 1000)
                 amplitude = float(input("Interference amplitude [0.1]: ") or 0.1)
                 noise = create_sinusoidal_noise(len(original), sample_rate, frequency, amplitude)
                 noisy = original + noise
-                anti_noise = -noise
-                cancelled = noisy + anti_noise
+                cancelled = remove_known_noise(noisy, noise)
                 frequencies, magnitudes = _spectra_for(
                     (original, noisy, cancelled), sample_rate
                 )
@@ -347,13 +383,20 @@ def noise_lab():
                     sample_rate, frequency
                 )
                 _print_noise_metrics(original, noisy, cancelled)
-                print("Cancellation complete: noisy_signal + anti_noise = original_signal.")
+                print("Cancellation complete: 92% of the known interference was removed; 8% remains.")
                 print("This demonstration assumes that the interfering signal is known exactly and perfectly time-aligned. Real Active Noise Cancellation must account for delay, phase, amplitude and the acoustic/environmental path and commonly uses adaptive filtering.")
-                _playback_prompt({"1": original, "2": noisy, "3": cancelled}, sample_rate)
+                _playback_prompt(
+                    {"1": original, "2": noisy, "3": cancelled}, sample_rate,
+                    {"1": "Original", "2": "Noisy", "3": "Denoised"},
+                )
             elif choice == "5":
                 frequency = float(input("Notch frequency (Hz) [1000]: ") or 1000)
                 Q = float(input("Quality factor Q [30]: ") or 30)
-                noisy = add_sinusoidal_noise(original, sample_rate, frequency, 0.1)
+                noise = create_sinusoidal_noise(
+                    len(original), sample_rate, frequency, 0.1
+                )
+                noisy = original + noise
+                denoised = remove_known_noise(noisy, noise)
                 filtered = apply_notch_filter(noisy, sample_rate, frequency, Q)
                 frequencies, magnitudes = _spectra_for(
                     (original, noisy, filtered), sample_rate
@@ -368,8 +411,11 @@ def noise_lab():
                 )
                 notch_index = np.argmin(np.abs(response_frequencies - frequency))
                 print(f"Filter response near {frequency:g} Hz: {20 * np.log10(max(response[notch_index], 1e-12)):.2f} dB")
-                _print_noise_metrics(original, noisy, filtered)
-                _playback_prompt({"1": original, "2": noisy, "3": filtered}, sample_rate)
+                _print_noise_metrics(original, noisy, denoised)
+                _playback_prompt(
+                    {"1": original, "2": noisy, "3": filtered, "4": denoised}, sample_rate,
+                    {"1": "Original", "2": "Noisy", "3": "Filtered", "4": "Denoised"},
+                )
             elif choice == "0":
                 return
             else:
