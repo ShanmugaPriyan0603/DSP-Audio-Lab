@@ -15,6 +15,8 @@ from dsp.noise import (
     play_audio,
     stop_audio,
 )
+from dsp.metrics import calculate_noise_metrics
+from dsp.separation import isolate_frequency_band
 from visualization.plots import (
     plot_audio_analysis,
     plot_cancellation_results,
@@ -23,6 +25,7 @@ from visualization.plots import (
     plot_noise_spectrum_comparison,
     plot_signal_and_spectrum,
     plot_spectrogram,
+    plot_frequency_band_isolation,
 )
 
 
@@ -37,6 +40,7 @@ def print_banner():
     print("║  [3] FFT / Spectrum Analysis                 ║")
     print("║  [4] STFT / Spectrogram                      ║")
     print("║  [5] Noise Lab                               ║")
+    print("║  [6] Source Separation Lab                   ║")
     print("║                                              ║")
     print("╚══════════════════════════════════════════════╝")
     print()
@@ -244,6 +248,26 @@ def _playback_prompt(signals, sample_rate):
             print("Invalid playback command.")
 
 
+def _print_noise_metrics(original, noisy, processed):
+    """Print comparable RMS and SNR measurements for a noise experiment."""
+    metrics = calculate_noise_metrics(original, noisy, processed)
+
+    def format_db(value):
+        return "inf" if np.isinf(value) else f"{value:.2f}"
+
+    print()
+    print("Noise-removal measurements")
+    print("=" * 66)
+    print(f"{'Measurement':<28}{'Value':>18}{'Unit':>12}")
+    print("-" * 66)
+    print(f"{'RMS level (original)':<28}{metrics['rms_level']:>18.6f}{'amplitude':>12}")
+    print(f"{'Noise RMS (noisy-original)':<28}{metrics['noise_rms']:>18.6f}{'amplitude':>12}")
+    print(f"{'SNR before processing':<28}{format_db(metrics['snr_before_db']):>18}{'dB':>12}")
+    print(f"{'SNR after processing':<28}{format_db(metrics['snr_after_db']):>18}{'dB':>12}")
+    print(f"{'SNR improvement':<28}{format_db(metrics['snr_improvement_db']):>18}{'dB':>12}")
+    print("=" * 66)
+
+
 def _show_noise_comparison(original, noisy, sample_rate, title, marked_frequency=None):
     """Display waveform and spectrum comparisons for a noise operation."""
     time = np.arange(len(original)) / sample_rate
@@ -313,6 +337,7 @@ def noise_lab():
                     (frequencies, magnitudes[0], magnitudes[1], magnitudes[2]),
                     sample_rate, frequency
                 )
+                _print_noise_metrics(original, noisy, cancelled)
                 print("Cancellation complete: noisy_signal + anti_noise = original_signal.")
                 print("This demonstration assumes that the interfering signal is known exactly and perfectly time-aligned. Real Active Noise Cancellation must account for delay, phase, amplitude and the acoustic/environmental path and commonly uses adaptive filtering.")
                 _playback_prompt({"1": original, "2": noisy, "3": cancelled}, sample_rate)
@@ -334,6 +359,7 @@ def noise_lab():
                 )
                 notch_index = np.argmin(np.abs(response_frequencies - frequency))
                 print(f"Filter response near {frequency:g} Hz: {20 * np.log10(max(response[notch_index], 1e-12)):.2f} dB")
+                _print_noise_metrics(original, noisy, filtered)
                 _playback_prompt({"1": original, "2": noisy, "3": filtered}, sample_rate)
             elif choice == "0":
                 return
@@ -343,6 +369,78 @@ def noise_lab():
             print(f"Invalid Noise Lab parameter: {error}")
         except Exception as error:
             print(f"Noise Lab error: {error}")
+
+
+def source_separation_lab():
+    """Run source-separation experiments controlled from the terminal."""
+    print()
+    print("═══ SOURCE SEPARATION LAB ═══")
+    print()
+    original, sample_rate = _load_noise_source()
+    if original is None or sample_rate is None:
+        return
+
+    while True:
+        print()
+        print("[1] Frequency Band Isolation")
+        print("[2] Harmonic / Percussive Separation")
+        print("[3] Time-Frequency Masking")
+        print("[4] Vocal Isolation")
+        print("[5] Compare Source Spectra")
+        print("[0] Back")
+        choice = input("SOURCE SEPARATION LAB > ").strip()
+
+        if choice == "0":
+            return
+        if choice != "1":
+            print("That separation experiment is not implemented yet.")
+            continue
+
+        try:
+            low_frequency = float(input("Low frequency (Hz) [20]: ") or 20)
+            high_frequency = float(input("High frequency (Hz) [250]: ") or 250)
+            n_fft = 2048
+            hop_length = 512
+            print("Applying STFT frequency mask...")
+            original_stft, _, masked_stft, isolated = isolate_frequency_band(
+                original,
+                sample_rate,
+                low_frequency,
+                high_frequency,
+                n_fft,
+                hop_length,
+            )
+            plot_frequency_band_isolation(
+                original,
+                isolated,
+                original_stft,
+                masked_stft,
+                sample_rate,
+                hop_length,
+                low_frequency,
+                high_frequency,
+            )
+            print("Band isolation complete.")
+            while True:
+                playback = input("[P] Play  [S] Stop  [Enter] Continue: ").strip().lower()
+                if playback == "p":
+                    selection = input("Play [1] Original  [2] Isolated band: ").strip()
+                    selected = {"1": original, "2": isolated}.get(selection)
+                    if selected is None:
+                        print("Invalid playback selection.")
+                    else:
+                        play_audio(selected, sample_rate)
+                elif playback == "s":
+                    stop_audio()
+                    print("Playback stopped.")
+                elif playback == "":
+                    break
+                else:
+                    print("Invalid playback command.")
+        except (ValueError, TypeError) as error:
+            print(f"Invalid Source Separation parameter: {error}")
+        except Exception as error:
+            print(f"Source Separation Lab error: {error}")
 def main():
     while True:
 
@@ -367,6 +465,9 @@ def main():
 
         elif choice == "5":
             noise_lab()
+
+        elif choice == "6":
+            source_separation_lab()
 
         elif choice == "0":
             print()

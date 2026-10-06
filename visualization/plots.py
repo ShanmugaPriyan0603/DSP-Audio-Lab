@@ -119,6 +119,53 @@ def plot_spectrogram(stft, sample_rate, hop_length=512):
     plt.show()
 
 
+def plot_frequency_band_isolation(
+    original,
+    isolated,
+    original_stft,
+    masked_stft,
+    sample_rate,
+    hop_length,
+    low_frequency,
+    high_frequency,
+):
+    """Display the source and the result of a frequency-band mask."""
+    time = np.arange(len(original)) / sample_rate
+    magnitude_db = [
+        librosa.amplitude_to_db(np.abs(stft), ref=np.max)
+        for stft in (original_stft, masked_stft)
+    ]
+    maximum_frequency = min(20000, sample_rate / 2)
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+    _plot_waveform(axes[0, 0], time, original, "Original Waveform")
+    _plot_waveform(axes[0, 1], time, isolated, "Isolated Band Waveform")
+
+    for axis, values, title in zip(
+        axes[1], magnitude_db, ("Original Spectrogram", "Masked Spectrogram")
+    ):
+        librosa.display.specshow(
+            values,
+            sr=sample_rate,
+            hop_length=hop_length,
+            x_axis="time",
+            y_axis="hz",
+            ax=axis,
+        )
+        axis.set_title(title)
+        axis.set_ylim(0, maximum_frequency)
+        axis.axhline(low_frequency, color="tab:orange", linestyle="--")
+        axis.axhline(high_frequency, color="tab:orange", linestyle="--")
+
+    fig.suptitle(
+        f"Frequency Band Isolation: {low_frequency:g}-{high_frequency:g} Hz",
+        fontsize=15,
+        fontweight="bold",
+    )
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    plt.show()
+
+
 def _spectrum_limit(sample_rate):
     """Return a readable upper frequency limit for spectrum plots."""
     return min(20000, sample_rate / 2)
@@ -186,17 +233,86 @@ def plot_cancellation_results(
     interference_frequency,
 ):
     """Display original, noisy, and anti-noise-cancelled signals and spectra."""
-    labels = ("Original", "Noisy", "Cancelled")
-    fig, axes = plt.subplots(3, 2, figsize=(14, 10), sharex="col")
-    for row, label in enumerate(labels):
+    plot_noise_removal_comparison(
+        time,
+        signals,
+        spectra[0],
+        spectra[1:],
+        sample_rate,
+        "Anti-Noise Cancellation",
+        interference_frequency,
+        processed_label="Cancelled = Noisy + (-Noise)",
+    )
+
+
+def plot_noise_removal_comparison(
+    time,
+    signals,
+    frequencies,
+    magnitudes,
+    sample_rate,
+    title,
+    marked_frequency=None,
+    attenuation_db=None,
+    processed_label="Processed",
+):
+    """Display aligned original, noisy, and processed signals and spectra."""
+    labels = ("Original", "Noisy", processed_label)
+    colors = ("tab:blue", "tab:red", "tab:green")
+    fig, axes = plt.subplots(
+        3, 2, figsize=(14, 11), sharex="col", sharey="col"
+    )
+
+    for row, (label, color) in enumerate(zip(labels, colors)):
         _plot_waveform(axes[row, 0], time, signals[row], f"{label} Waveform")
         _plot_spectrum(
-            axes[row, 1], frequencies=spectra[0], magnitude=spectra[row + 1],
-            sample_rate=sample_rate, label=label
+            axes[row, 1], frequencies, magnitudes[row], sample_rate,
+            label, color
         )
         axes[row, 1].set_title(f"{label} Spectrum")
-        axes[row, 1].axvline(interference_frequency, color="black", linestyle="--")
-    plt.tight_layout()
+
+    waveform_limit = max(
+        float(np.max(np.abs(signal))) for signal in signals
+    )
+    for axis in axes[:, 0]:
+        axis.set_ylim(-waveform_limit * 1.1, waveform_limit * 1.1)
+
+    spectrum_db = [
+        20 * np.log10(np.maximum(magnitude, 1e-12))
+        for magnitude in magnitudes
+    ]
+    spectrum_min = min(float(np.min(values)) for values in spectrum_db)
+    spectrum_max = max(float(np.max(values)) for values in spectrum_db)
+    for axis in axes[:, 1]:
+        axis.set_ylim(spectrum_min - 3, spectrum_max + 3)
+
+    if marked_frequency is not None and marked_frequency <= _spectrum_limit(sample_rate):
+        for axis in axes[:, 1]:
+            axis.axvline(
+                marked_frequency, color="black", linestyle="--", linewidth=1
+            )
+            axis.annotate(
+                f"Injected noise: {marked_frequency:g} Hz",
+                xy=(marked_frequency, 0.95),
+                xycoords=("data", "axes fraction"),
+                ha="center",
+                va="top",
+                fontsize=9,
+                backgroundcolor="white",
+            )
+        if attenuation_db is not None:
+            axes[2, 1].annotate(
+                f"Attenuation: {attenuation_db:.2f} dB",
+                xy=(0.98, 0.08),
+                xycoords="axes fraction",
+                ha="right",
+                va="bottom",
+                fontsize=10,
+                bbox={"boxstyle": "round,pad=0.25", "fc": "white", "ec": "0.5"},
+            )
+
+    fig.suptitle(title, fontsize=15, fontweight="bold")
+    plt.tight_layout(rect=(0, 0, 1, 0.97))
     plt.show()
 
 
@@ -213,23 +329,19 @@ def plot_filter_result(
     notch_frequency,
 ):
     """Display waveform and spectrum changes before and after notch filtering."""
-    fig, axes = plt.subplots(2, 1, figsize=(12, 9))
-    _plot_waveform(axes[0], time, original, "Original Waveform")
-    axes[0].plot(time[: min(len(time), int(sample_rate * 10))],
-                 noisy[: min(len(noisy), int(sample_rate * 10))],
-                 alpha=0.65, label="Noisy")
-    axes[0].plot(time[: min(len(time), int(sample_rate * 10))],
-                 filtered[: min(len(filtered), int(sample_rate * 10))],
-                 alpha=0.8, label="Filtered")
-    axes[0].legend()
-
-    for magnitude, label, color in (
-        (original_magnitude, "Original", "tab:blue"),
-        (noisy_magnitude, "Noisy", "tab:red"),
-        (filtered_magnitude, "Filtered", "tab:green"),
-    ):
-        _plot_spectrum(axes[1], frequencies, magnitude, sample_rate, label, color)
-    axes[1].set_title(f"Notch Filter Spectrum ({notch_frequency:g} Hz)")
-    axes[1].axvline(notch_frequency, color="black", linestyle="--")
-    plt.tight_layout()
-    plt.show()
+    notch_index = np.argmin(np.abs(frequencies - notch_frequency))
+    attenuation_db = 20 * np.log10(
+        max(filtered_magnitude[notch_index], 1e-12)
+        / max(noisy_magnitude[notch_index], 1e-12)
+    )
+    plot_noise_removal_comparison(
+        time,
+        (original, noisy, filtered),
+        frequencies,
+        (original_magnitude, noisy_magnitude, filtered_magnitude),
+        sample_rate,
+        f"Notch Filter Comparison ({notch_frequency:g} Hz)",
+        notch_frequency,
+        attenuation_db,
+        processed_label="Filtered",
+    )
